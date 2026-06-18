@@ -8,7 +8,9 @@ import VercelConnection from './VercelConnection';
 // Use React.lazy for dynamic imports
 const GitHubConnection = React.lazy(() => import('./GithubConnection'));
 const NetlifyConnection = React.lazy(() => import('./NetlifyConnection'));
-const CoolifyConnection = React.lazy(() => import('./CoolifyConnection'));
+const DokployConnection = React.lazy(() => import('./DokployConnection'));
+// const CoolifyConnection = React.lazy(() => import('./CoolifyConnection'));
+// const CoolifyConnection = React.lazy(() => import('./CoolifyConnection'));
 
 // Loading fallback component
 const LoadingFallback = () => (
@@ -161,7 +163,7 @@ export default function ConnectionsTab() {
           <VercelConnection />
         </Suspense>
         <Suspense fallback={<LoadingFallback />}>
-          <CoolifyConnection />
+          <DokployConnection />
         </Suspense>
       </div>
 

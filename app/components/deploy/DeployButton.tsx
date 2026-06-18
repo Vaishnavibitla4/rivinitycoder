@@ -2,7 +2,8 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useStore } from '@nanostores/react';
 import { netlifyConnection } from '~/lib/stores/netlify';
 import { vercelConnection } from '~/lib/stores/vercel';
-import { coolifyConnection } from '~/lib/stores/coolify';
+import { dokployConnection } from '~/lib/stores/dokploy';
+// import { coolifyConnection } from '~/lib/stores/coolify';
 import { workbenchStore } from '~/lib/stores/workbench';
 import { streamingState } from '~/lib/stores/streaming';
 import { classNames } from '~/utils/classNames';
@@ -11,27 +12,30 @@ import { NetlifyDeploymentLink } from '~/components/chat/NetlifyDeploymentLink.c
 import { VercelDeploymentLink } from '~/components/chat/VercelDeploymentLink.client';
 import { useVercelDeploy } from '~/components/deploy/VercelDeploy.client';
 import { useNetlifyDeploy } from '~/components/deploy/NetlifyDeploy.client';
-import { useCoolifyDeploy } from '~/components/deploy/CoolifyDeploy.client';
+import { useDokployDeploy } from '~/components/deploy/DokployDeploy.client';
+// import { useCoolifyDeploy } from '~/components/deploy/CoolifyDeploy.client';
 
 interface DeployButtonProps {
   onVercelDeploy?: () => Promise<void>;
   onNetlifyDeploy?: () => Promise<void>;
-  onCoolifyDeploy?: () => Promise<void>;
+  onDokployDeploy?: () => Promise<void>; // ← renamed
 }
 
-export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onCoolifyDeploy }: DeployButtonProps) => {
+export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onDokployDeploy }: DeployButtonProps) => {
   const netlifyConn = useStore(netlifyConnection);
   const vercelConn = useStore(vercelConnection);
-  const coolifyConn = useStore(coolifyConnection);
+  const dokployConn = useStore(dokployConnection);
+  // const coolifyConn = useStore(coolifyConnection);
   const [activePreviewIndex] = useState(0);
   const previews = useStore(workbenchStore.previews);
   const activePreview = previews[activePreviewIndex];
   const [isDeploying, setIsDeploying] = useState(false);
-  const [deployingTo, setDeployingTo] = useState<'netlify' | 'vercel' | 'coolify' | null>(null);
+  const [deployingTo, setDeployingTo] = useState<'netlify' | 'vercel' | 'dokploy' | null>(null);
   const isStreaming = useStore(streamingState);
   const { handleVercelDeploy } = useVercelDeploy();
   const { handleNetlifyDeploy } = useNetlifyDeploy();
-  const { handleCoolifyDeploy } = useCoolifyDeploy();
+  const { handleDokployDeploy } = useDokployDeploy();
+  // const { handleCoolifyDeploy } = useCoolifyDeploy();
 
   const handleVercelDeployClick = async () => {
     setIsDeploying(true);
@@ -65,15 +69,15 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onCoolifyDeploy 
     }
   };
 
-  const handleCoolifyDeployClick = async () => {
+  const handleDokployDeployClick = async () => {
     setIsDeploying(true);
-    setDeployingTo('coolify');
+    setDeployingTo('dokploy');
 
     try {
-      if (onCoolifyDeploy) {
-        await onCoolifyDeploy();
+      if (onDokployDeploy) {
+        await onDokployDeploy();
       } else {
-        await handleCoolifyDeploy();
+        await handleDokployDeploy();
       }
     } finally {
       setIsDeploying(false);
@@ -105,6 +109,28 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onCoolifyDeploy 
         >
           <DropdownMenu.Item
             className={classNames(
+              'cursor-pointer flex items-center w-full px-4 py-2 text-sm text-bolt-elements-textPrimary hover:bg-bolt-elements-item-backgroundActive gap-2 rounded-md',
+              { 'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !dokployConn.user },
+            )}
+            disabled={isDeploying || !activePreview || !dokployConn.user}
+            onClick={async () => {
+              setIsDeploying(true);
+              setDeployingTo('dokploy');
+              try {
+                await handleDokployDeploy();
+              } finally {
+                setIsDeploying(false);
+                setDeployingTo(null);
+              }
+            }}
+          >
+            <div className="w-5 h-5 rounded bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center flex-shrink-0">
+              <div className="i-ph:rocket-launch w-3 h-3 text-white" />
+            </div>
+            <span className="mx-auto">{!dokployConn.user ? 'No Dokploy Instance Connected' : 'Deploy to Dokploy'}</span>
+          </DropdownMenu.Item>
+          {/* <DropdownMenu.Item
+            className={classNames(
               'cursor-pointer flex items-center w-full px-4 py-2 text-sm text-bolt-elements-textPrimary hover:bg-bolt-elements-item-backgroundActive gap-2 rounded-md group relative',
               {
                 'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !netlifyConn.user,
@@ -112,8 +138,8 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onCoolifyDeploy 
             )}
             disabled={isDeploying || !activePreview || !netlifyConn.user}
             onClick={handleNetlifyDeployClick}
-          >
-            <img
+          > */}
+          {/* <img
               className="w-5 h-5"
               height="24"
               width="24"
@@ -122,7 +148,7 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onCoolifyDeploy 
             />
             <span className="mx-auto">{!netlifyConn.user ? 'No Netlify Account Connected' : 'Deploy to Netlify'}</span>
             {netlifyConn.user && <NetlifyDeploymentLink />}
-          </DropdownMenu.Item>
+          </DropdownMenu.Item> */}
 
           <DropdownMenu.Item
             className={classNames(
@@ -150,18 +176,16 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onCoolifyDeploy 
             className={classNames(
               'cursor-pointer flex items-center w-full px-4 py-2 text-sm text-bolt-elements-textPrimary hover:bg-bolt-elements-item-backgroundActive gap-2 rounded-md group relative',
               {
-                'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !coolifyConn.user,
+                'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !dokployConn.user,
               },
             )}
-            disabled={isDeploying || !activePreview || !coolifyConn.user}
-            onClick={handleCoolifyDeployClick}
+            disabled={isDeploying || !activePreview || !dokployConn.user}
+            onClick={handleDokployDeployClick}
           >
             <div className="w-5 h-5 rounded bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center flex-shrink-0">
               <div className="i-ph:rocket-launch w-3 h-3 text-white" />
             </div>
-            <span className="mx-auto">
-              {!coolifyConn.user ? 'No Coolify Instance Connected' : 'Deploy to Coolify'}
-            </span>
+            <span className="mx-auto">{!dokployConn.user ? 'No Dokploy Instance Connected' : 'Deploy to Dokploy'}</span>
           </DropdownMenu.Item>
 
           <DropdownMenu.Item
