@@ -106,7 +106,9 @@ async function llmCallAction({ context, request }: ActionFunctionArgs) {
         }
 
         // Fall back to the first model in the provider (same behaviour as stream-text.ts)
-        logger.warn(`MODEL [${model}] not found in provider [${providerName}]. Falling back to first model: ${providerModels[0].name}`);
+        logger.warn(
+          `MODEL [${model}] not found in provider [${providerName}]. Falling back to first model: ${providerModels[0].name}`,
+        );
         modelDetails = providerModels[0];
       }
 

@@ -25,14 +25,15 @@ export interface DokployConnection {
   stats?: DokployStats;
 }
 
+/*
+ * Response shape returned by /api/dokploy-deploy after switching to
+ * application.dropDeployment + application.redeploy.
+ */
 export interface DokployDeployResponse {
-  site: {
-    id: string;
-    appName: string;
-    name: string;
-  };
-  deploy: {
-    id: string;
-    url: string;
-  };
+  success: boolean;
+  applicationId: string;
+  appName: string;
+  url: string; // the real, reachable deployed app URL (traefik.me domain)
+  redeployed: boolean; // false on first deploy, true on subsequent redeploys
+  error?: string;
 }

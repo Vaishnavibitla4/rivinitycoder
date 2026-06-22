@@ -11,7 +11,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
   try {
     const result = await streamText({
       messages,
-      env: context.cloudflare?.env, 
+      env: context.cloudflare?.env,
       apiKeys,
       files,
       promptId,

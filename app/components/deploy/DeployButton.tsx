@@ -3,6 +3,7 @@ import { useStore } from '@nanostores/react';
 import { netlifyConnection } from '~/lib/stores/netlify';
 import { vercelConnection } from '~/lib/stores/vercel';
 import { dokployConnection } from '~/lib/stores/dokploy';
+
 // import { coolifyConnection } from '~/lib/stores/coolify';
 import { workbenchStore } from '~/lib/stores/workbench';
 import { streamingState } from '~/lib/stores/streaming';
@@ -13,18 +14,21 @@ import { VercelDeploymentLink } from '~/components/chat/VercelDeploymentLink.cli
 import { useVercelDeploy } from '~/components/deploy/VercelDeploy.client';
 import { useNetlifyDeploy } from '~/components/deploy/NetlifyDeploy.client';
 import { useDokployDeploy } from '~/components/deploy/DokployDeploy.client';
+
 // import { useCoolifyDeploy } from '~/components/deploy/CoolifyDeploy.client';
 
 interface DeployButtonProps {
   onVercelDeploy?: () => Promise<void>;
   onNetlifyDeploy?: () => Promise<void>;
-  onDokployDeploy?: () => Promise<void>; // ← renamed
+
+  // onDokployDeploy?: () => Promise<void>;  ← renamed
 }
 
-export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onDokployDeploy }: DeployButtonProps) => {
+export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy }: DeployButtonProps) => {
   const netlifyConn = useStore(netlifyConnection);
   const vercelConn = useStore(vercelConnection);
   const dokployConn = useStore(dokployConnection);
+
   // const coolifyConn = useStore(coolifyConnection);
   const [activePreviewIndex] = useState(0);
   const previews = useStore(workbenchStore.previews);
@@ -35,6 +39,7 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onDokployDeploy 
   const { handleVercelDeploy } = useVercelDeploy();
   const { handleNetlifyDeploy } = useNetlifyDeploy();
   const { handleDokployDeploy } = useDokployDeploy();
+
   // const { handleCoolifyDeploy } = useCoolifyDeploy();
 
   const handleVercelDeployClick = async () => {
@@ -62,22 +67,6 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onDokployDeploy 
         await onNetlifyDeploy();
       } else {
         await handleNetlifyDeploy();
-      }
-    } finally {
-      setIsDeploying(false);
-      setDeployingTo(null);
-    }
-  };
-
-  const handleDokployDeployClick = async () => {
-    setIsDeploying(true);
-    setDeployingTo('dokploy');
-
-    try {
-      if (onDokployDeploy) {
-        await onDokployDeploy();
-      } else {
-        await handleDokployDeploy();
       }
     } finally {
       setIsDeploying(false);
@@ -116,6 +105,7 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onDokployDeploy 
             onClick={async () => {
               setIsDeploying(true);
               setDeployingTo('dokploy');
+
               try {
                 await handleDokployDeploy();
               } finally {
@@ -129,26 +119,6 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onDokployDeploy 
             </div>
             <span className="mx-auto">{!dokployConn.user ? 'No Dokploy Instance Connected' : 'Deploy to Dokploy'}</span>
           </DropdownMenu.Item>
-          {/* <DropdownMenu.Item
-            className={classNames(
-              'cursor-pointer flex items-center w-full px-4 py-2 text-sm text-bolt-elements-textPrimary hover:bg-bolt-elements-item-backgroundActive gap-2 rounded-md group relative',
-              {
-                'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !netlifyConn.user,
-              },
-            )}
-            disabled={isDeploying || !activePreview || !netlifyConn.user}
-            onClick={handleNetlifyDeployClick}
-          > */}
-          {/* <img
-              className="w-5 h-5"
-              height="24"
-              width="24"
-              crossOrigin="anonymous"
-              src="https://cdn.simpleicons.org/netlify"
-            />
-            <span className="mx-auto">{!netlifyConn.user ? 'No Netlify Account Connected' : 'Deploy to Netlify'}</span>
-            {netlifyConn.user && <NetlifyDeploymentLink />}
-          </DropdownMenu.Item> */}
 
           <DropdownMenu.Item
             className={classNames(
@@ -176,16 +146,21 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy, onDokployDeploy 
             className={classNames(
               'cursor-pointer flex items-center w-full px-4 py-2 text-sm text-bolt-elements-textPrimary hover:bg-bolt-elements-item-backgroundActive gap-2 rounded-md group relative',
               {
-                'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !dokployConn.user,
+                'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !netlifyConn.user,
               },
             )}
-            disabled={isDeploying || !activePreview || !dokployConn.user}
-            onClick={handleDokployDeployClick}
+            disabled={isDeploying || !activePreview || !netlifyConn.user}
+            onClick={handleNetlifyDeployClick}
           >
-            <div className="w-5 h-5 rounded bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center flex-shrink-0">
-              <div className="i-ph:rocket-launch w-3 h-3 text-white" />
-            </div>
-            <span className="mx-auto">{!dokployConn.user ? 'No Dokploy Instance Connected' : 'Deploy to Dokploy'}</span>
+            <img
+              className="w-5 h-5"
+              height="24"
+              width="24"
+              crossOrigin="anonymous"
+              src="https://cdn.simpleicons.org/netlify"
+            />
+            <span className="mx-auto">{!netlifyConn.user ? 'No Netlify Account Connected' : 'Deploy to Netlify'}</span>
+            {netlifyConn.user && <NetlifyDeploymentLink />}
           </DropdownMenu.Item>
 
           <DropdownMenu.Item

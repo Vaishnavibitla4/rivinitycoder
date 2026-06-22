@@ -9,8 +9,11 @@ import VercelConnection from './VercelConnection';
 const GitHubConnection = React.lazy(() => import('./GithubConnection'));
 const NetlifyConnection = React.lazy(() => import('./NetlifyConnection'));
 const DokployConnection = React.lazy(() => import('./DokployConnection'));
-// const CoolifyConnection = React.lazy(() => import('./CoolifyConnection'));
-// const CoolifyConnection = React.lazy(() => import('./CoolifyConnection'));
+
+/*
+ * const CoolifyConnection = React.lazy(() => import('./CoolifyConnection'));
+ * const CoolifyConnection = React.lazy(() => import('./CoolifyConnection'));
+ */
 
 // Loading fallback component
 const LoadingFallback = () => (

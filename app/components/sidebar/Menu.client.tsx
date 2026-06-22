@@ -82,8 +82,14 @@ export const Menu = () => {
   const loadEntries = useCallback(() => {
     if (db) {
       getAll(db)
-        .then((list) => list.filter((item) => item.urlId && item.description || true)) // Temporarily allow all to debug, or just remove filter
-        .then((list) => list.map(item => ({ ...item, description: item.description || 'Untitled Chat', urlId: item.urlId || item.id })))
+        .then((list) => list.filter((item) => (item.urlId && item.description) || true)) // Temporarily allow all to debug, or just remove filter
+        .then((list) =>
+          list.map((item) => ({
+            ...item,
+            description: item.description || 'Untitled Chat',
+            urlId: item.urlId || item.id,
+          })),
+        )
         .then(setList)
         .catch((error) => toast.error(error.message));
     }

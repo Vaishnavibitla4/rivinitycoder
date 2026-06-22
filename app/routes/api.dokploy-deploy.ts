@@ -1,248 +1,301 @@
-// app/routes/api.dokploy-deploy.ts
+/*
+ * app/routes/api.dokploy-deploy.ts
+ *
+ * Deploys (or redeploys) a Rivinity-generated app to Dokploy using the
+ * native "drop deployment" mechanism — a real ZIP file uploaded as
+ * multipart/form-data, no base64 / env-var smuggling involved.
+ *
+ * First deploy:  project.all/create -> application.create ->
+ *                application.update(sourceType:"drop") ->
+ *                domain.generateDomain -> domain.create ->
+ *                application.dropDeployment -> application.deploy
+ *
+ * Redeploy:      application.dropDeployment -> application.redeploy
+ *                (same applicationId, same domain — just new code)
+ */
 
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 
-interface DokployDeployRequestBody {
-  token: string;
-  instanceUrl: string;
-  files: Record<string, string>;
-  chatId: string;
-  applicationId?: string; // stored after first deploy for redeployment
-}
-
 export async function action({ request }: ActionFunctionArgs) {
   try {
-    const { token, instanceUrl, files, chatId, applicationId } = (await request.json()) as DokployDeployRequestBody;
+    const formData = await request.formData();
 
-    if (!token) return Response.json({ error: 'No Dokploy API token provided.' }, { status: 401 });
-    if (!instanceUrl) return Response.json({ error: 'Dokploy instance URL not configured.' }, { status: 400 });
+    const token = formData.get('token') as string | null;
+    const instanceUrlRaw = formData.get('instanceUrl') as string | null;
+    const chatId = formData.get('chatId') as string | null;
+    const applicationId = formData.get('applicationId') as string | null;
+    const zipFile = formData.get('zip') as File | null;
 
-    const baseUrl = instanceUrl.replace(/\/$/, '');
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    };
-
-    // ── Build ZIP of all files ─────────────────────────────────────────────────
-    const zipBytes = await buildZip(files);
-    let binaryString = '';
-    for (let i = 0; i < zipBytes.length; i++) {
-      binaryString += String.fromCharCode(zipBytes[i]);
+    if (!token) {
+      return Response.json({ error: 'No Dokploy API token provided.' }, { status: 401 });
     }
-    const zipBase64 = btoa(binaryString);
 
-    let appId = applicationId;
-    let appName: string;
+    if (!instanceUrlRaw) {
+      return Response.json({ error: 'Dokploy instance URL not configured.' }, { status: 400 });
+    }
 
-    if (!appId) {
-      // ── FIRST DEPLOY: Create a new Dokploy application ──────────────────────
-      // Step 1: get the first available project
-      const projectsRes = await fetch(`${baseUrl}/api/project.all`, { headers });
-      if (!projectsRes.ok) return Response.json({ error: 'Failed to list Dokploy projects' }, { status: 400 });
+    if (!chatId) {
+      return Response.json({ error: 'No chat id provided.' }, { status: 400 });
+    }
 
-      const projects = (await projectsRes.json()) as any[];
-      let projectId: string;
+    if (!zipFile) {
+      return Response.json({ error: 'No zip file provided.' }, { status: 400 });
+    }
 
-      if (projects.length > 0) {
-        projectId = projects[0].projectId;
-      } else {
-        // Create a project if none exists
-        const createRes = await fetch(`${baseUrl}/api/project.create`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ name: `rivinity-${chatId.slice(0, 8)}`, description: 'Created by Rivinity AI' }),
-        });
-        if (!createRes.ok) return Response.json({ error: 'Failed to create Dokploy project' }, { status: 400 });
-        const newProject = (await createRes.json()) as any;
-        projectId = newProject.projectId;
+    /*
+     * Dokploy's dropDeployment endpoint has a known bug where uploads larger
+     * than ~1MB fail with a generic 500 (Next.js API route bodyParser limit).
+     * Fail early with a clear message instead of a cryptic server error.
+     */
+    const ONE_MB = 1024 * 1024;
+
+    if (zipFile.size > ONE_MB) {
+      return Response.json(
+        {
+          error: `Build output is ${(zipFile.size / ONE_MB).toFixed(1)}MB, which exceeds Dokploy's ~1MB drop-deployment upload limit. Consider reducing bundle size, or use a Git-based deployment instead.`,
+        },
+        { status: 413 },
+      );
+    }
+
+    const instanceUrl = instanceUrlRaw.replace(/\/$/, '');
+    const jsonHeaders = { 'x-api-key': token, 'Content-Type': 'application/json' };
+    const fileHeaders = { 'x-api-key': token }; // no Content-Type — browser/runtime sets multipart boundary
+
+    /*
+     * ─────────────────────────────────────────────────────────────────
+     * REDEPLOYMENT PATH — applicationId already exists for this chat
+     * ─────────────────────────────────────────────────────────────────
+     */
+    if (applicationId) {
+      const dropForm = new FormData();
+      dropForm.append('applicationId', applicationId);
+      dropForm.append('zip', zipFile, 'site.zip');
+
+      const dropRes = await fetch(`${instanceUrl}/api/trpc/application.dropDeployment`, {
+        method: 'POST',
+        headers: fileHeaders,
+        body: dropForm,
+      });
+
+      if (!dropRes.ok) {
+        const body = await dropRes.text();
+        return Response.json({ error: `Failed to upload zip: ${body}` }, { status: 500 });
       }
 
-      // Step 2: Create the application
-      appName = `rivinity-${chatId.slice(0, 8)}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-
-      const createAppRes = await fetch(`${baseUrl}/api/application.create`, {
+      const redeployRes = await fetch(`${instanceUrl}/api/application.redeploy`, {
         method: 'POST',
-        headers,
+        headers: jsonHeaders,
+        body: JSON.stringify({ applicationId }),
+      });
+
+      if (!redeployRes.ok) {
+        const body = await redeployRes.text();
+        return Response.json({ error: `Failed to trigger redeploy: ${body}` }, { status: 500 });
+      }
+
+      // Look up the existing domain to return the same URL
+      const domainsRes = await fetch(`${instanceUrl}/api/domain.byApplicationId?applicationId=${applicationId}`, {
+        headers: fileHeaders,
+      });
+      const domains = domainsRes.ok ? ((await domainsRes.json()) as any[]) : [];
+      const host = domains?.[0]?.host;
+      const url = host ? `http://${host}` : instanceUrl;
+
+      return Response.json({
+        success: true,
+        applicationId,
+        appName: applicationId,
+        url,
+        redeployed: true,
+      });
+    }
+
+    /*
+     * ─────────────────────────────────────────────────────────────────
+     * FIRST DEPLOY PATH — create everything from scratch
+     * ─────────────────────────────────────────────────────────────────
+     */
+
+    // 1. Find or create a project + get its environmentId
+    const projectsRes = await fetch(`${instanceUrl}/api/project.all`, { headers: fileHeaders });
+
+    if (!projectsRes.ok) {
+      return Response.json({ error: 'Failed to list Dokploy projects' }, { status: 400 });
+    }
+
+    const projects = (await projectsRes.json()) as any[];
+
+    let environmentId: string | undefined = projects?.[0]?.environments?.[0]?.environmentId;
+
+    if (!environmentId) {
+      const createProjRes = await fetch(`${instanceUrl}/api/project.create`, {
+        method: 'POST',
+        headers: jsonHeaders,
         body: JSON.stringify({
-          name: appName,
-          projectId,
-          // Use Docker provider so we can supply a Dockerfile
-          sourceType: 'docker',
-          dockerImage: 'nginx:alpine',
+          name: `rivinity-${chatId.slice(0, 8)}`,
+          description: 'Created by Rivinity AI',
         }),
       });
 
-      if (!createAppRes.ok) {
-        const body = await createAppRes.text();
-        return Response.json({ error: `Failed to create Dokploy app: ${body}` }, { status: 400 });
+      if (!createProjRes.ok) {
+        const body = await createProjRes.text();
+        return Response.json({ error: `Failed to create Dokploy project: ${body}` }, { status: 400 });
       }
 
-      const newApp = (await createAppRes.json()) as any;
-      appId = newApp.applicationId;
-      appName = newApp.appName;
-    } else {
-      // Get existing app name for the response
-      const appRes = await fetch(`${baseUrl}/api/application.one?applicationId=${appId}`, { headers });
-      const appData = appRes.ok ? ((await appRes.json()) as any) : {};
-      appName = appData.appName ?? appId;
+      const newProject = (await createProjRes.json()) as any;
+      environmentId = newProject?.environments?.[0]?.environmentId;
     }
 
-    // ── Store files as an env var (same ZIP+base64 strategy as Coolify) ───────
-    // Dokploy's env API: POST /api/application.saveEnvironment
-    const envRes = await fetch(`${baseUrl}/api/application.saveEnvironment`, {
+    if (!environmentId) {
+      return Response.json({ error: 'Could not resolve a Dokploy environmentId.' }, { status: 500 });
+    }
+
+    // 2. Create the application
+    const appName = `rivinity-${chatId.slice(0, 8)}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+
+    const createAppRes = await fetch(`${instanceUrl}/api/application.create`, {
       method: 'POST',
-      headers,
+      headers: jsonHeaders,
+      body: JSON.stringify({ name: appName, environmentId }),
+    });
+
+    if (!createAppRes.ok) {
+      const body = await createAppRes.text();
+      return Response.json({ error: `Failed to create Dokploy app: ${body}` }, { status: 400 });
+    }
+
+    const newApp = (await createAppRes.json()) as any;
+    const appId: string = newApp.applicationId;
+    const appNameSlug: string = newApp.appName ?? appName;
+
+    /*
+     * 3. Set sourceType to "drop" and buildType to "static"
+     *    (static = serve the unzipped files directly, no build step on Dokploy's side
+     *     since Rivinity already built the project inside WebContainer)
+     *
+     *    publishDirectory: "." — the ZIP we upload already contains the built
+     *    output at its root (index.html etc. live at the top level of the zip,
+     *    not inside a nested "dist" folder), so we tell Dokploy to serve from
+     *    the extraction root rather than looking for a "dist" subfolder.
+     *
+     *    isStaticSpa: true — enables SPA fallback (serves index.html for all
+     *    routes), which most Vite/React/Vue apps need for client-side routing.
+     */
+    const updateRes = await fetch(`${instanceUrl}/api/application.update`, {
+      method: 'POST',
+      headers: jsonHeaders,
       body: JSON.stringify({
         applicationId: appId,
-        env: `SITE_B64=${zipBase64}`,
+        sourceType: 'drop',
+        buildType: 'static',
+        publishDirectory: '.',
+        isStaticSpa: true,
       }),
     });
 
-    if (!envRes.ok) {
-      const body = await envRes.text();
-      return Response.json({ error: `Failed to set env on Dokploy app: ${body}` }, { status: 500 });
+    if (!updateRes.ok) {
+      const body = await updateRes.text();
+      return Response.json({ error: `Failed to configure app source: ${body}` }, { status: 500 });
     }
 
-    // ── Trigger deploy / redeploy ─────────────────────────────────────────────
-    // Same endpoint for both first deploy and redeployment
-    const deployRes = await fetch(`${baseUrl}/api/application.deploy`, {
+    // 4. Generate a free traefik.me domain for this app
+    const genDomainRes = await fetch(`${instanceUrl}/api/domain.generateDomain`, {
       method: 'POST',
-      headers,
+      headers: jsonHeaders,
+      body: JSON.stringify({ appName: appNameSlug }),
+    });
+
+    if (!genDomainRes.ok) {
+      const body = await genDomainRes.text();
+      return Response.json({ error: `Failed to generate domain: ${body}` }, { status: 500 });
+    }
+
+    /*
+     * domain.generateDomain returns the full URL as a raw string, e.g.
+     * "http://myapp-abc123.192.168.1.100.traefik.me" — NOT a JSON object
+     * with a `.domain` or `.host` field. Read as text and strip the protocol.
+     */
+    const rawDomainResponse = (await genDomainRes.text()).trim();
+
+    /*
+     * The response may come back as a bare string or as a JSON-quoted string
+     * ("http://...") depending on Dokploy version — handle both.
+     */
+    let fullUrl: string;
+
+    try {
+      const parsed = JSON.parse(rawDomainResponse);
+      fullUrl = typeof parsed === 'string' ? parsed : (parsed.domain ?? parsed.host ?? rawDomainResponse);
+    } catch {
+      fullUrl = rawDomainResponse;
+    }
+
+    const generatedHost = fullUrl.replace(/^https?:\/\//, '');
+
+    if (!generatedHost) {
+      return Response.json({ error: 'Dokploy did not return a usable domain.' }, { status: 500 });
+    }
+
+    // 5. Attach the generated domain to the application
+    const createDomainRes = await fetch(`${instanceUrl}/api/domain.create`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({
+        host: generatedHost,
+        applicationId: appId,
+        port: 80,
+        https: false,
+        certificateType: 'none',
+      }),
+    });
+
+    if (!createDomainRes.ok) {
+      const body = await createDomainRes.text();
+      return Response.json({ error: `Failed to attach domain: ${body}` }, { status: 500 });
+    }
+
+    // 6. Upload the ZIP via dropDeployment (multipart — real file, no base64)
+    const dropForm = new FormData();
+    dropForm.append('applicationId', appId);
+    dropForm.append('zip', zipFile, 'site.zip');
+
+    const dropRes = await fetch(`${instanceUrl}/api/trpc/application.dropDeployment`, {
+      method: 'POST',
+      headers: fileHeaders,
+      body: dropForm,
+    });
+
+    if (!dropRes.ok) {
+      const body = await dropRes.text();
+      return Response.json({ error: `Failed to upload zip: ${body}` }, { status: 500 });
+    }
+
+    // 7. Trigger the deploy
+    const deployRes = await fetch(`${instanceUrl}/api/application.deploy`, {
+      method: 'POST',
+      headers: jsonHeaders,
       body: JSON.stringify({ applicationId: appId }),
     });
 
     if (!deployRes.ok) {
       const body = await deployRes.text();
-      return Response.json({ error: `Failed to trigger Dokploy deploy: ${body}` }, { status: 500 });
+      return Response.json({ error: `Failed to trigger deploy: ${body}` }, { status: 500 });
     }
 
-    const deployData = (await deployRes.json()) as any;
+    const url = `http://${generatedHost}`;
 
     return Response.json({
       success: true,
-      site: {
-        id: appId,
-        appName,
-        name: `rivinity-${chatId.slice(0, 8)}`,
-      },
-      deploy: {
-        id: deployData.deploymentId ?? 'pending',
-        url: `${baseUrl}`, // Dokploy dashboard URL
-      },
+      applicationId: appId,
+      appName: appNameSlug,
+      url,
+      redeployed: false,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Deployment failed';
     console.error('Dokploy deploy error:', error);
+
     return Response.json({ error: message }, { status: 500 });
   }
-}
-
-// ── ZIP builder (pure, no Node.js deps) ────────────────────────────────────────
-// Uses the ZIP format spec directly since Cloudflare Workers don't have Node.js fs.
-
-async function buildZip(files: Record<string, string>): Promise<Uint8Array> {
-  const encoder = new TextEncoder();
-  const crc32Table = makeCrc32Table();
-
-  const entries: Uint8Array[] = [];
-  const centralDirectory: Uint8Array[] = [];
-  let offset = 0;
-
-  for (const [rawPath, content] of Object.entries(files)) {
-    const filePath = rawPath.startsWith('/') ? rawPath.slice(1) : rawPath;
-    const fileData = encoder.encode(content);
-    const crc = crc32(crc32Table, fileData);
-    const pathData = encoder.encode(filePath);
-
-    // Local file header
-    const localHeader = new DataView(new ArrayBuffer(30 + pathData.length));
-    localHeader.setUint32(0, 0x04034b50, true); // signature
-    localHeader.setUint16(4, 20, true); // version needed
-    localHeader.setUint16(6, 0, true); // flags
-    localHeader.setUint16(8, 0, true); // compression (stored)
-    localHeader.setUint16(10, 0, true); // mod time
-    localHeader.setUint16(12, 0, true); // mod date
-    localHeader.setUint32(14, crc, true); // crc32
-    localHeader.setUint32(18, fileData.length, true); // compressed size
-    localHeader.setUint32(22, fileData.length, true); // uncompressed size
-    localHeader.setUint16(26, pathData.length, true); // filename length
-    localHeader.setUint16(28, 0, true); // extra field length
-    new Uint8Array(localHeader.buffer).set(pathData, 30);
-
-    const localHeaderBytes = new Uint8Array(localHeader.buffer);
-    entries.push(localHeaderBytes, fileData);
-
-    // Central directory entry
-    const centralEntry = new DataView(new ArrayBuffer(46 + pathData.length));
-    centralEntry.setUint32(0, 0x02014b50, true); // signature
-    centralEntry.setUint16(4, 20, true); // version made by
-    centralEntry.setUint16(6, 20, true); // version needed
-    centralEntry.setUint16(8, 0, true); // flags
-    centralEntry.setUint16(10, 0, true); // compression
-    centralEntry.setUint16(12, 0, true); // mod time
-    centralEntry.setUint16(14, 0, true); // mod date
-    centralEntry.setUint32(16, crc, true); // crc32
-    centralEntry.setUint32(20, fileData.length, true); // compressed size
-    centralEntry.setUint32(24, fileData.length, true); // uncompressed size
-    centralEntry.setUint16(28, pathData.length, true); // filename length
-    centralEntry.setUint16(30, 0, true); // extra field length
-    centralEntry.setUint16(32, 0, true); // comment length
-    centralEntry.setUint16(34, 0, true); // disk start
-    centralEntry.setUint16(36, 0, true); // internal attrs
-    centralEntry.setUint32(38, 0, true); // external attrs
-    centralEntry.setUint32(42, offset, true); // relative offset
-    new Uint8Array(centralEntry.buffer).set(pathData, 46);
-
-    centralDirectory.push(new Uint8Array(centralEntry.buffer));
-    offset += localHeaderBytes.length + fileData.length;
-  }
-
-  const centralDirSize = centralDirectory.reduce((s, e) => s + e.length, 0);
-  const eocd = new DataView(new ArrayBuffer(22));
-  eocd.setUint32(0, 0x06054b50, true); // signature
-  eocd.setUint16(4, 0, true); // disk number
-  eocd.setUint16(6, 0, true); // disk with central dir
-  eocd.setUint16(8, centralDirectory.length, true); // entries on disk
-  eocd.setUint16(10, centralDirectory.length, true); // total entries
-  eocd.setUint32(12, centralDirSize, true); // central dir size
-  eocd.setUint32(16, offset, true); // central dir offset
-  eocd.setUint16(20, 0, true); // comment length
-
-  const all = [...entries, ...centralDirectory, new Uint8Array(eocd.buffer)];
-  const totalSize = all.reduce((s, a) => s + a.length, 0);
-  const result = new Uint8Array(totalSize);
-  let pos = 0;
-
-  for (const chunk of all) {
-    result.set(chunk, pos);
-    pos += chunk.length;
-  }
-
-  return result;
-}
-
-function makeCrc32Table(): Uint32Array {
-  const table = new Uint32Array(256);
-
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-
-    for (let j = 0; j < 8; j++) {
-      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    }
-
-    table[i] = c;
-  }
-
-  return table;
-}
-
-function crc32(table: Uint32Array, data: Uint8Array): number {
-  let crc = 0xffffffff;
-
-  for (let i = 0; i < data.length; i++) {
-    crc = table[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
-  }
-
-  return (crc ^ 0xffffffff) >>> 0;
 }

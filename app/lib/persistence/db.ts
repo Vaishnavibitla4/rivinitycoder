@@ -1,5 +1,4 @@
 import type { Message } from 'ai';
-import { createScopedLogger } from '~/utils/logger';
 import type { ChatHistoryItem } from './useChatHistory';
 import type { Snapshot } from './types';
 
@@ -9,21 +8,23 @@ export interface IChatMetadata {
   netlifySiteId?: string;
 }
 
-const logger = createScopedLogger('ChatHistory');
-
 // Return a dummy object to satisfy consumers, or just true
 export async function openDatabase(): Promise<any | undefined> {
   return { type: 'mysql' };
 }
 
-export async function getAll(db: any): Promise<ChatHistoryItem[]> {
+export async function getAll(_db: any): Promise<ChatHistoryItem[]> {
   const response = await fetch('/api/history');
-  if (!response.ok) throw new Error('Failed to fetch chats');
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch chats');
+  }
+
   return await response.json();
 }
 
 export async function setMessages(
-  db: any,
+  _db: any,
   id: string,
   messages: Message[],
   urlId?: string,
@@ -43,13 +44,21 @@ export async function setMessages(
       metadata,
     }),
   });
-  if (!response.ok) throw new Error('Failed to save chat');
+
+  if (!response.ok) {
+    throw new Error('Failed to save chat');
+  }
 }
 
-export async function getMessages(db: any, id: string): Promise<ChatHistoryItem> {
+export async function getMessages(_db: any, id: string): Promise<ChatHistoryItem> {
   const response = await fetch(`/api/history?id=${id}`);
-  if (!response.ok) return null as any; 
-  const data = await response.json() as ChatHistoryItem;
+
+  if (!response.ok) {
+    return null as any;
+  }
+
+  const data = (await response.json()) as ChatHistoryItem;
+
   return data;
 }
 
@@ -61,7 +70,7 @@ export async function getMessagesById(db: any, id: string): Promise<ChatHistoryI
   return getMessages(db, id);
 }
 
-export async function deleteById(db: any, id: string): Promise<void> {
+export async function deleteById(_db: any, id: string): Promise<void> {
   await fetch('/api/history', {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
@@ -69,23 +78,29 @@ export async function deleteById(db: any, id: string): Promise<void> {
   });
 }
 
-export async function getNextId(db: any): Promise<string> {
+export async function getNextId(_db: any): Promise<string> {
   return Date.now().toString();
 }
 
-export async function getUrlId(db: any, id: string): Promise<string> {
+export async function getUrlId(_db: any, id: string): Promise<string> {
   const response = await fetch('/api/history'); // Get all to check urlIds
-  if (!response.ok) return id;
+
+  if (!response.ok) {
+    return id;
+  }
+
   const chats: any[] = await response.json();
-  const idList = chats.map(c => c.urlId);
+  const idList = chats.map((c) => c.urlId);
 
   if (!idList.includes(id)) {
     return id;
   } else {
     let i = 2;
+
     while (idList.includes(`${id}-${i}`)) {
       i++;
     }
+
     return `${id}-${i}`;
   }
 }
@@ -129,15 +144,7 @@ export async function createChatFromMessages(
   const newId = await getNextId(db);
   const newUrlId = await getUrlId(db, newId);
 
-  await setMessages(
-    db,
-    newId,
-    messages,
-    newUrlId,
-    description,
-    undefined,
-    metadata,
-  );
+  await setMessages(db, newId, messages, newUrlId, description, undefined, metadata);
 
   return newUrlId;
 }
@@ -148,15 +155,11 @@ export async function updateChatDescription(db: any, id: string, description: st
   if (!chat) {
     throw new Error('Chat not found');
   } // No change needed for this logic, just reused getMessages/setMessages which are already API-based.
-  
+
   await setMessages(db, id, chat.messages, chat.urlId, description, chat.timestamp, chat.metadata);
 }
 
-export async function updateChatMetadata(
-  db: any,
-  id: string,
-  metadata: IChatMetadata | undefined,
-): Promise<void> {
+export async function updateChatMetadata(db: any, id: string, metadata: IChatMetadata | undefined): Promise<void> {
   const chat = await getMessages(db, id);
 
   if (!chat) {
@@ -173,8 +176,11 @@ export async function getSnapshot(db: any, chatId: string): Promise<Snapshot | u
 
 export async function setSnapshot(db: any, chatId: string, snapshot: Snapshot): Promise<void> {
   const chat = await getMessages(db, chatId);
-  if (!chat) return; // Or throw
-  
+
+  if (!chat) {
+    return;
+  } // Or throw
+
   await fetch('/api/history', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -185,26 +191,15 @@ export async function setSnapshot(db: any, chatId: string, snapshot: Snapshot): 
       description: chat.description,
       timestamp: chat.timestamp,
       metadata: chat.metadata,
-      snapshot
+      snapshot,
     }),
   });
 }
 
 export async function deleteSnapshot(db: any, chatId: string): Promise<void> {
   const chat = await getMessages(db, chatId);
-  if (!chat) return;
 
-  const response = await fetch('/api/history', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      id: chat.id,
-      messages: chat.messages,
-      urlId: chat.urlId,
-      description: chat.description,
-      timestamp: chat.timestamp,
-      metadata: chat.metadata,
-      snapshot: null
-    }),
-  });
+  if (!chat) {
+    return;
+  }
 }

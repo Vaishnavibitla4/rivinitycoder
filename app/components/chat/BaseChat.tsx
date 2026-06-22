@@ -19,7 +19,6 @@ import { ImportButtons } from '~/components/chat/chatExportAndImport/ImportButto
 import { ExamplePrompts } from '~/components/chat/ExamplePrompts';
 import GitCloneButton from './GitCloneButton';
 import type { ProviderInfo } from '~/types/model';
-import StarterTemplates from './StarterTemplates';
 import type { ActionAlert, SupabaseAlert, DeployAlert, LlmErrorAlertType } from '~/types/actions';
 import DeployChatAlert from '~/components/deploy/DeployAlert';
 import ChatAlert from './ChatAlert';
@@ -350,13 +349,16 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       >
         <ClientOnly>{() => <Menu />}</ClientOnly>
         <div className="flex flex-col lg:flex-row overflow-y-auto w-full h-full">
-          <div 
+          <div
             className={classNames(styles.Chat, 'flex flex-col flex-grow lg:min-w-[var(--chat-min-width)] h-full', {
               'lg:mr-[var(--workbench-width)]': showWorkbench,
             })}
           >
             {!chatStarted && (
-              <div id="intro" className="mt-[16vh] max-w-2xl mx-auto text-center px-4 lg:px-0 flex flex-col items-center">
+              <div
+                id="intro"
+                className="mt-[16vh] max-w-2xl mx-auto text-center px-4 lg:px-0 flex flex-col items-center"
+              >
                 <img src="/Rivinity.in.png" alt="Rivinity" className="w-64 h-auto mb-4 animate-fade-in" />
               </div>
             )}

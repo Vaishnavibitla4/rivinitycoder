@@ -39,9 +39,7 @@ describe('stripCodeFenceFromArtifact', () => {
       '```',
     ].join('\n');
 
-    const expected = ['Some text', '', "<div class='__Rivinity__'></div>", '', '```', 'regular code', '```'].join(
-      '\n',
-    );
+    const expected = ['Some text', '', "<div class='__Rivinity__'></div>", '', '```', 'regular code', '```'].join('\n');
 
     expect(stripCodeFenceFromArtifact(input)).toBe(expected);
   });

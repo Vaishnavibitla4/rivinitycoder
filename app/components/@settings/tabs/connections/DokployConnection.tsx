@@ -14,10 +14,8 @@ import {
 export default function DokployConnection() {
   const connection = useStore(dokployConnection);
   const connecting = useStore(isConnecting);
-  const [instanceUrl, setInstanceUrl] = useState(connection.instanceUrl || 'http://localhost:3000');
+  const [instanceUrl, setInstanceUrl] = useState(connection.instanceUrl || 'http://127.0.0.1:3000');
   const [token, setToken] = useState(connection.token || '');
-  console.log('TOKEN:', import.meta.env.VITE_DOKPLOY_API_TOKEN);
-  console.log('URL:', import.meta.env.VITE_DOKPLOY_INSTANCE_URL);
 
   useEffect(() => {
     if (connection.user && connection.token && connection.instanceUrl) {
@@ -25,13 +23,14 @@ export default function DokployConnection() {
     }
   }, []);
 
-  const handleConnect = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleConnect = async () => {
     if (!instanceUrl || !token) {
       toast.error('Please fill in both fields');
       return;
     }
+
     isConnecting.set(true);
+
     try {
       const userData = await connectToDokploy(token, instanceUrl);
       updateDokployConnection({ user: userData, token, instanceUrl });
@@ -50,6 +49,12 @@ export default function DokployConnection() {
     toast.success('Disconnected from Dokploy');
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleConnect();
+    }
+  };
+
   if (connection.user) {
     return (
       <div className="p-4 border border-bolt-elements-borderColor rounded-lg">
@@ -60,7 +65,6 @@ export default function DokployConnection() {
           </button>
         </div>
         <p className="text-sm text-bolt-elements-textSecondary">{connection.instanceUrl}</p>
-        <p className="text-sm text-bolt-elements-textSecondary">{connection.user.email}</p>
         {connection.stats && (
           <p className="text-xs text-bolt-elements-textTertiary mt-1">{connection.stats.totalSites} app(s) deployed</p>
         )}
@@ -69,14 +73,15 @@ export default function DokployConnection() {
   }
 
   return (
-    <form onSubmit={handleConnect} className="p-4 border border-bolt-elements-borderColor rounded-lg space-y-3">
+    <div className="p-4 border border-bolt-elements-borderColor rounded-lg space-y-3">
       <h3 className="font-medium text-bolt-elements-textPrimary">Connect to Dokploy</h3>
       <div>
         <label className="block text-xs text-bolt-elements-textSecondary mb-1">Instance URL</label>
         <input
           value={instanceUrl}
           onChange={(e) => setInstanceUrl(e.target.value)}
-          placeholder="http://localhost:3000"
+          onKeyDown={handleKeyDown}
+          placeholder="http://127.0.0.1:3000"
           className="w-full px-3 py-2 text-sm bg-bolt-elements-background-depth-1 border border-bolt-elements-borderColor rounded"
         />
       </div>
@@ -86,17 +91,19 @@ export default function DokployConnection() {
           type="password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
-          placeholder="Dokploy Settings → API"
+          onKeyDown={handleKeyDown}
+          placeholder="Dokploy Settings → Profile → API/CLI"
           className="w-full px-3 py-2 text-sm bg-bolt-elements-background-depth-1 border border-bolt-elements-borderColor rounded"
         />
       </div>
       <button
-        type="submit"
+        type="button"
         disabled={connecting}
+        onClick={handleConnect}
         className="w-full py-2 text-sm bg-accent-500 text-white rounded hover:bg-accent-600 disabled:opacity-60"
       >
         {connecting ? 'Connecting...' : 'Connect'}
       </button>
-    </form>
+    </div>
   );
 }

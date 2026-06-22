@@ -10,12 +10,6 @@ const storedConnection = typeof window !== 'undefined' ? localStorage.getItem('d
 const envToken = import.meta.env.VITE_DOKPLOY_API_TOKEN;
 const envInstanceUrl = import.meta.env.VITE_DOKPLOY_INSTANCE_URL || '';
 
-console.log({
-  storedConnection,
-  envToken,
-  envInstanceUrl,
-});
-
 const initialConnection: DokployConnection = storedConnection
   ? JSON.parse(storedConnection)
   : { user: null, token: envToken || '', instanceUrl: envInstanceUrl };
@@ -27,35 +21,49 @@ export const isFetchingStats = atom<boolean>(false);
 export const updateDokployConnection = (updates: Partial<DokployConnection>) => {
   const newState = { ...dokployConnection.get(), ...updates };
   dokployConnection.set(newState);
+
   if (typeof window !== 'undefined') {
     localStorage.setItem('dokploy_connection', JSON.stringify(newState));
   }
 };
 
-export async function connectToDokploy(token: string, instanceUrl: string) {
-  const baseUrl = instanceUrl.replace(/\/$/, '');
-  // Dokploy auth check — GET /api/auth.get with token in header
-  const res = await fetch(`${baseUrl}/api/user.get`, {
-    headers: { 'x-api-key': token },
+/*
+ * Bug fix: route through /api/dokploy-connect (server-side) to avoid CORS block.
+ * The browser cannot directly fetch http://localhost:3000 from a different origin.
+ */
+export async function connectToDokploy(token: string, instanceUrl: string): Promise<DokployUser> {
+  const res = await fetch('/api/dokploy-connect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, instanceUrl, action: 'connect' }),
   });
 
-  if (!res.ok) throw new Error(`Auth failed: ${res.statusText}`);
+  const data = (await res.json()) as any;
 
-  const userData = (await res.json()) as DokployUser;
-  return userData;
+  if (!res.ok) {
+    throw new Error(data.error || `Connection failed (${res.status})`);
+  }
+
+  return data.user as DokployUser;
 }
 
 export async function fetchDokployStats(token: string, instanceUrl: string) {
   try {
     isFetchingStats.set(true);
-    const baseUrl = instanceUrl.replace(/\/$/, '');
-    const res = await fetch(`${baseUrl}/api/application.all`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error(`Failed to fetch apps: ${res.status}`);
 
-    const apps = (await res.json()) as any[];
-    const sites = apps.map((app: any) => ({
+    const res = await fetch('/api/dokploy-connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, instanceUrl, action: 'stats' }),
+    });
+
+    const data = (await res.json()) as any;
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to fetch stats');
+    }
+
+    const sites = (data.apps as any[]).map((app: any) => ({
       id: app.applicationId,
       name: app.name,
       appName: app.appName,

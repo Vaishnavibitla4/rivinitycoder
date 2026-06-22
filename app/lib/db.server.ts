@@ -1,57 +1,3 @@
-// import mysql from 'mysql2/promise';
-
-// interface DBConfig {
-//   host: string;
-//   user: string;
-//   password?: string;
-//   database: string;
-//   port?: number;
-// }
-
-// const dbConfig: DBConfig = {
-//   host: process.env.DB_HOST || 'localhost',
-//   user: process.env.DB_USER || 'root',
-//   password: process.env.DB_PASSWORD,
-//   database: process.env.DB_NAME || 'bharatai',
-//   port: Number(process.env.DB_PORT) || 3306,
-// };
-
-// // Create a connection pool
-// const pool = mysql.createPool({
-//   ...dbConfig,
-//   waitForConnections: true,
-//   connectionLimit: 10,
-//   queueLimit: 0,
-// });
-
-// export async function initDB() {
-//   const connection = await pool.getConnection();
-//   try {
-//     await connection.query(`
-//       CREATE TABLE IF NOT EXISTS rivinity_webbuilder_chats (
-//         id VARCHAR(255) PRIMARY KEY,
-//         urlId VARCHAR(255) UNIQUE,
-//         description TEXT,
-//         messages JSON,
-//         timestamp DATETIME,
-//         metadata JSON,
-//         snapshot JSON
-//       )
-//     `);
-//   } finally {
-//     connection.release();
-//   }
-// }
-
-// initDB().catch(console.error);
-
-// export async function query<T>(sql: string, params?: any[]): Promise<T> {
-//   const [results] = await pool.execute(sql, params);
-//   return results as T;
-// }
-
-// export default pool;
-
 import { Pool } from 'pg';
 
 interface DBConfig {
@@ -70,16 +16,27 @@ const dbConfig: DBConfig = {
   port: Number(process.env.DB_PORT) || 5432,
 };
 
+console.log({
+  DB_HOST: process.env.DB_HOST,
+  DB_USER: process.env.DB_USER,
+  DB_NAME: process.env.DB_NAME,
+  DB_PORT: process.env.DB_PORT,
+});
+
 const pool = new Pool({
   ...dbConfig,
   max: 10,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 30000,
 });
 
 export async function initDB() {
+  console.log('Initializing DB...');
+
   const client = await pool.connect();
+
   try {
+    console.log('Connected to DB');
     await client.query(`
       CREATE TABLE IF NOT EXISTS rivinity_webbuilder_chats (
         id VARCHAR(255) PRIMARY KEY,
@@ -91,6 +48,7 @@ export async function initDB() {
         snapshot JSONB
       )
     `);
+    console.log('Table check complete');
   } finally {
     client.release();
   }

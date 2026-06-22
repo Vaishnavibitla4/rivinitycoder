@@ -157,10 +157,12 @@ export function useCoolifyDeploy() {
       });
 
       toast.success(`Deployed to Coolify! 🚀 ${data.deploy.url}`);
+
       return true;
     } catch (error) {
       console.error('Coolify deploy error:', error);
       toast.error(error instanceof Error ? error.message : 'Coolify deployment failed');
+
       return false;
     } finally {
       setIsDeploying(false);
