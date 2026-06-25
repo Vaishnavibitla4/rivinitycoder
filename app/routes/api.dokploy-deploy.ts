@@ -8,10 +8,14 @@
  * First deploy:  project.all/create -> application.create ->
  *                application.update(sourceType:"drop") ->
  *                domain.generateDomain -> domain.create ->
- *                application.dropDeployment -> application.deploy
+ *                application.dropDeployment  (triggers deploy internally)
  *
- * Redeploy:      application.dropDeployment -> application.redeploy
+ * Redeploy:      application.dropDeployment  (triggers redeploy internally)
  *                (same applicationId, same domain — just new code)
+ *
+ * NOTE: Do NOT call application.deploy or application.redeploy after
+ * dropDeployment — it already starts the deployment. Calling either
+ * of those endpoints afterwards causes a double-deploy.
  */
 
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
@@ -83,16 +87,9 @@ export async function action({ request }: ActionFunctionArgs) {
         return Response.json({ error: `Failed to upload zip: ${body}` }, { status: 500 });
       }
 
-      const redeployRes = await fetch(`${instanceUrl}/api/application.redeploy`, {
-        method: 'POST',
-        headers: jsonHeaders,
-        body: JSON.stringify({ applicationId }),
-      });
-
-      if (!redeployRes.ok) {
-        const body = await redeployRes.text();
-        return Response.json({ error: `Failed to trigger redeploy: ${body}` }, { status: 500 });
-      }
+      // dropDeployment already triggers the deployment internally on Dokploy's side.
+      // Do NOT call application.redeploy after it — that would start a second
+      // deployment, which is exactly the double-deploy bug seen in the dashboard.
 
       // Look up the existing domain to return the same URL
       const domainsRes = await fetch(`${instanceUrl}/api/domain.byApplicationId?applicationId=${applicationId}`, {
@@ -271,17 +268,9 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json({ error: `Failed to upload zip: ${body}` }, { status: 500 });
     }
 
-    // 7. Trigger the deploy
-    const deployRes = await fetch(`${instanceUrl}/api/application.deploy`, {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify({ applicationId: appId }),
-    });
-
-    if (!deployRes.ok) {
-      const body = await deployRes.text();
-      return Response.json({ error: `Failed to trigger deploy: ${body}` }, { status: 500 });
-    }
+    // Step 7 removed — application.dropDeployment already triggers the deployment
+    // internally. Calling application.deploy after it starts a second deployment,
+    // causing the double-deploy seen in the Dokploy dashboard.
 
     const url = `http://${generatedHost}`;
 

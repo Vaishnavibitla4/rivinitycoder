@@ -3,46 +3,65 @@ import { useStore } from '@nanostores/react';
 import { netlifyConnection } from '~/lib/stores/netlify';
 import { vercelConnection } from '~/lib/stores/vercel';
 import { dokployConnection } from '~/lib/stores/dokploy';
-
-// import { coolifyConnection } from '~/lib/stores/coolify';
 import { workbenchStore } from '~/lib/stores/workbench';
 import { streamingState } from '~/lib/stores/streaming';
 import { classNames } from '~/utils/classNames';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NetlifyDeploymentLink } from '~/components/chat/NetlifyDeploymentLink.client';
 import { VercelDeploymentLink } from '~/components/chat/VercelDeploymentLink.client';
 import { useVercelDeploy } from '~/components/deploy/VercelDeploy.client';
 import { useNetlifyDeploy } from '~/components/deploy/NetlifyDeploy.client';
 import { useDokployDeploy } from '~/components/deploy/DokployDeploy.client';
-
-// import { useCoolifyDeploy } from '~/components/deploy/CoolifyDeploy.client';
+import { chatId } from '~/lib/persistence/useChatHistory';
 
 interface DeployButtonProps {
   onVercelDeploy?: () => Promise<void>;
   onNetlifyDeploy?: () => Promise<void>;
-
-  // onDokployDeploy?: () => Promise<void>;  ← renamed
 }
 
 export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy }: DeployButtonProps) => {
   const netlifyConn = useStore(netlifyConnection);
   const vercelConn = useStore(vercelConnection);
   const dokployConn = useStore(dokployConnection);
-
-  // const coolifyConn = useStore(coolifyConnection);
+  const currentChatId = useStore(chatId);
   const [activePreviewIndex] = useState(0);
   const previews = useStore(workbenchStore.previews);
   const activePreview = previews[activePreviewIndex];
+
+  // Single isDeploying guard — prevents any second trigger while in flight
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployingTo, setDeployingTo] = useState<'netlify' | 'vercel' | 'dokploy' | null>(null);
   const isStreaming = useStore(streamingState);
+
   const { handleVercelDeploy } = useVercelDeploy();
   const { handleNetlifyDeploy } = useNetlifyDeploy();
   const { handleDokployDeploy } = useDokployDeploy();
 
-  // const { handleCoolifyDeploy } = useCoolifyDeploy();
+  // Track whether the app has been modified since last deploy.
+  // workbenchStore.getModifiedFiles() returns the set of files changed
+  // since the last save — we use this to switch to "Redeploy Changes".
+  const [hasModifications, setHasModifications] = useState(false);
+  const [lastDeployedChatId, setLastDeployedChatId] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check on every render if there are unsaved/modified files
+    const unsaved = workbenchStore.unsavedFiles.get();
+    const modified = workbenchStore.getModifiedFiles();
+    const hasDeployed = currentChatId ? !!localStorage.getItem(`dokploy-app-${currentChatId}`) : false;
+
+    setHasModifications(hasDeployed && (unsaved.size > 0 || (modified != null && Object.keys(modified).length > 0)));
+    setLastDeployedChatId(currentChatId && hasDeployed ? currentChatId : null);
+  });
+
+  const dokployLabel = () => {
+    if (!dokployConn.user) return 'No Dokploy Instance Connected';
+    if (hasModifications) return '🔄 Redeploy Changes to Dokploy';
+    if (lastDeployedChatId) return '✅ Deployed — Deploy Again';
+    return 'Deploy to Dokploy';
+  };
 
   const handleVercelDeployClick = async () => {
+    if (isDeploying) return; // hard guard against double-trigger
     setIsDeploying(true);
     setDeployingTo('vercel');
 
@@ -59,6 +78,7 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy }: DeployButtonPr
   };
 
   const handleNetlifyDeployClick = async () => {
+    if (isDeploying) return;
     setIsDeploying(true);
     setDeployingTo('netlify');
 
@@ -68,6 +88,21 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy }: DeployButtonPr
       } else {
         await handleNetlifyDeploy();
       }
+    } finally {
+      setIsDeploying(false);
+      setDeployingTo(null);
+    }
+  };
+
+  const handleDokployDeployClick = async () => {
+    if (isDeploying) return; // hard guard — prevents double-click / double-trigger
+    setIsDeploying(true);
+    setDeployingTo('dokploy');
+
+    try {
+      await handleDokployDeploy();
+      // After a successful deploy, reset modification indicator
+      setHasModifications(false);
     } finally {
       setIsDeploying(false);
       setDeployingTo(null);
@@ -84,6 +119,7 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy }: DeployButtonPr
           {isDeploying ? `Deploying to ${deployingTo}...` : 'Deploy'}
           <span className={classNames('i-ph:caret-down transition-transform')} />
         </DropdownMenu.Trigger>
+
         <DropdownMenu.Content
           className={classNames(
             'z-[250]',
@@ -96,38 +132,44 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy }: DeployButtonPr
           sideOffset={5}
           align="end"
         >
+          {/* ── Dokploy ── */}
           <DropdownMenu.Item
             className={classNames(
               'cursor-pointer flex items-center w-full px-4 py-2 text-sm text-bolt-elements-textPrimary hover:bg-bolt-elements-item-backgroundActive gap-2 rounded-md',
               { 'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !dokployConn.user },
             )}
             disabled={isDeploying || !activePreview || !dokployConn.user}
-            onClick={async () => {
-              setIsDeploying(true);
-              setDeployingTo('dokploy');
-
-              try {
-                await handleDokployDeploy();
-              } finally {
-                setIsDeploying(false);
-                setDeployingTo(null);
-              }
-            }}
+            // FIX: onSelect preventDefault stops Radix firing its own selection
+            // event after onClick, which was causing the deploy to trigger twice.
+            onSelect={(e) => e.preventDefault()}
+            onClick={handleDokployDeployClick}
           >
-            <div className="w-5 h-5 rounded bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center flex-shrink-0">
-              <div className="i-ph:rocket-launch w-3 h-3 text-white" />
+            <div
+              className={classNames(
+                'w-5 h-5 rounded flex items-center justify-center flex-shrink-0',
+                hasModifications
+                  ? 'bg-gradient-to-br from-orange-400 to-orange-600'
+                  : 'bg-gradient-to-br from-blue-500 to-blue-700',
+              )}
+            >
+              <div
+                className={classNames(
+                  hasModifications ? 'i-ph:arrow-clockwise' : 'i-ph:rocket-launch',
+                  'w-3 h-3 text-white',
+                )}
+              />
             </div>
-            <span className="mx-auto">{!dokployConn.user ? 'No Dokploy Instance Connected' : 'Deploy to Dokploy'}</span>
+            <span className="mx-auto">{dokployLabel()}</span>
           </DropdownMenu.Item>
 
+          {/* ── Vercel ── */}
           <DropdownMenu.Item
             className={classNames(
               'cursor-pointer flex items-center w-full px-4 py-2 text-sm text-bolt-elements-textPrimary hover:bg-bolt-elements-item-backgroundActive gap-2 rounded-md group relative',
-              {
-                'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !vercelConn.user,
-              },
+              { 'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !vercelConn.user },
             )}
             disabled={isDeploying || !activePreview || !vercelConn.user}
+            onSelect={(e) => e.preventDefault()}
             onClick={handleVercelDeployClick}
           >
             <img
@@ -142,14 +184,14 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy }: DeployButtonPr
             {vercelConn.user && <VercelDeploymentLink />}
           </DropdownMenu.Item>
 
+          {/* ── Netlify ── */}
           <DropdownMenu.Item
             className={classNames(
               'cursor-pointer flex items-center w-full px-4 py-2 text-sm text-bolt-elements-textPrimary hover:bg-bolt-elements-item-backgroundActive gap-2 rounded-md group relative',
-              {
-                'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !netlifyConn.user,
-              },
+              { 'opacity-60 cursor-not-allowed': isDeploying || !activePreview || !netlifyConn.user },
             )}
             disabled={isDeploying || !activePreview || !netlifyConn.user}
+            onSelect={(e) => e.preventDefault()}
             onClick={handleNetlifyDeployClick}
           >
             <img
@@ -163,6 +205,7 @@ export const DeployButton = ({ onVercelDeploy, onNetlifyDeploy }: DeployButtonPr
             {netlifyConn.user && <NetlifyDeploymentLink />}
           </DropdownMenu.Item>
 
+          {/* ── Cloudflare (coming soon) ── */}
           <DropdownMenu.Item
             disabled
             className="flex items-center w-full rounded-md px-4 py-2 text-sm text-bolt-elements-textTertiary gap-2 opacity-60 cursor-not-allowed"

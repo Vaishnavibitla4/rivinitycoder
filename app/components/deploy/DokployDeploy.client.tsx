@@ -159,6 +159,10 @@ export function useDokployDeploy() {
         localStorage.setItem(`dokploy-app-${currentChatId}`, data.applicationId);
       }
 
+      // Reset file modification tracking so DeployButton switches back from
+      // "Redeploy Changes" to "Deployed — Deploy Again" after a successful deploy.
+      workbenchStore.resetAllFileModifications();
+
       deployArtifact.runner.handleDeployAction('deploying', 'complete', {
         url: data.url,
         source: 'netlify',
